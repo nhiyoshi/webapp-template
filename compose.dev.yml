@@ -1,0 +1,30 @@
+# 開発環境設定
+services:
+  api:
+    extends:
+      file: compose.yml
+      service: api
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+      target: development
+    container_name: api
+    hostname: api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app
+      - /app/.venv
+    develop:
+      watch:
+        - action: sync
+          path: ./app
+          target: /app
+          ignore:
+            - .venv/
+        - action: rebuild
+          path: ./pyproject.toml
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    command: [ "fastapi", "dev", "--host", "0.0.0.0" ]

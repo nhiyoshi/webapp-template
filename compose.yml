@@ -1,0 +1,27 @@
+# 共通設定（compose.yml）
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    image: api
+    networks:
+      - web-app
+    env_file: .env
+    secrets:
+      - app-secret
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/healthcheck" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+# ローカルではdocker secrets(swarm)を使えないため、ファイルを読み込む
+secrets:
+  app-secret:
+    file: ./secret.json.local
+    external: false # fileを読み込むためfalseにしておく
+
+networks:
+  web-app:
+    driver: bridge
