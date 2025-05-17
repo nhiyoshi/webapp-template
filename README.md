@@ -10,6 +10,10 @@ AIエージェント(Cursor, Copilot等)を利用して、
 2. AIエージェントに要件定義書をもとにテストを実装するように依頼する。
 3. AIエージェントにテストが通るように実装を依頼する。
 
+## ドキュメント
+
+* [技術スタック](docs/technology_stack.md)
+
 ## 開発環境構築手順
 
 ### 事前準備
@@ -31,15 +35,3 @@ cp .env.example .env
 ```sh
 just start-development
 ```
-
-### Python
-
-サンプルコードが豊富でAIとの相性が良いことから選定。
-
-[UV](https://docs.astral.sh/uv/)
-Pythonのパッケージ管理です。
-
-[マニュアル](https://docs.astral.sh/uv/getting-started/installation/)に従ってインストールして下さい。
-
-[FastAPI](https://fastapi.tiangolo.com/)
-高速で自由度の高い設計が可能な素晴らしいFW。
