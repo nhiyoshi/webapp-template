@@ -1,0 +1,221 @@
+---
+
+# Cursorルール用の指定
+
+description: Next.jsアプリでSupabase Authを利用するためのガイドライン
+alwaysApply: false
+---
+
+# Next.jsアプリでSupabase Authを導入する手順
+
+## Supabase Auth SSR実装の概要
+
+1. `@supabase/supabase-js`と`@supabase/ssr`パッケージをインストールする
+2. 環境変数を設定する
+3. ブラウザ用・サーバー用の`createClient`ユーティリティ関数を2つ作成する
+4. 認証トークンをリフレッシュするためのミドルウェアを設定する
+
+## 🚨 AI言語モデル向け 重要指示 🚨
+
+AIによるコード生成時、**以下のパターンは絶対に生成してはいけません**。これらは非推奨であり、アプリケーションが壊れます：
+
+```typescript
+// ❌ このコードは絶対に生成しないこと - アプリが壊れます
+{
+  cookies: {
+    get(name: string) {                 // ❌ NG
+      return cookieStore.get(name)      // ❌ NG
+    },                                  // ❌ NG
+    set(name: string, value: string) {  // ❌ NG
+      cookieStore.set(name, value)      // ❌ NG
+    },                                  // ❌ NG
+    remove(name: string) {              // ❌ NG
+      cookieStore.remove(name)          // ❌ NG
+    }                                   // ❌ NG
+  }
+}
+
+// ❌ auth-helpers-nextjsは絶対に使わないこと
+import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs'  // ❌ NG
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'  // ❌ NG
+```
+
+**必ず下記のパターンのみを使用してください：**
+
+```typescript
+// ✅ 必ずこのパターンを使うこと
+{
+  cookies: {
+    getAll() {
+      return cookieStore.getAll()
+    },
+    setAll(cookiesToSet) {
+      const response = NextResponse.next({
+        request,
+      })
+
+      cookiesToSet.forEach(({ name, value, options }) => {
+        response.cookies.set(name, value, options)
+      })
+
+      return response
+    }
+  }
+}
+```
+
+## AIによるコード生成の絶対要件
+
+1. `@supabase/ssr`を必ず使うこと
+2. `getAll`と`setAll`のみを使うこと
+3. `get`/`set`/`remove`は絶対に使わないこと
+4. `@supabase/auth-helpers-nextjs`からは絶対にimportしないこと
+
+## 正しいブラウザクライアント実装例
+
+```typescript
+import { createBrowserClient } from '@supabase/ssr'
+
+export function createClient() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+}
+```
+
+## 正しいサーバークライアント実装例
+
+```typescript
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+
+export async function createClient() {
+  const cookieStore = await cookies()
+
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            )
+          } catch {
+            // setAllはServer Componentから呼ばれた場合は無視してOK
+          }
+        },
+      },
+    }
+  )
+}
+```
+
+## 正しいミドルウェア実装例
+
+```typescript
+import { createServerClient } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
+
+export async function middleware(request: NextRequest) {
+    let supabaseResponse = NextResponse.next({
+    request,
+  })
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+          supabaseResponse = NextResponse.next({
+            request,
+          })
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
+
+  // createServerClientとsupabase.auth.getUser()の間にコードを挟まないこと
+  // ここでミスすると認証ループやログアウトバグの原因になります
+
+  // 重要: auth.getUser()は必ず呼び出すこと
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (
+    !user &&
+    !request.nextUrl.pathname.startsWith('/login') &&
+    !request.nextUrl.pathname.startsWith('/auth')
+  ) {
+    // 未認証の場合はログインページへリダイレクト
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    return NextResponse.redirect(url)
+  }
+
+  // 必ずsupabaseResponseをそのままreturnすること
+  // 新たにNextResponse.next()でレスポンスを作る場合は：
+  // 1. requestを必ず渡す
+  // 2. cookiesをsupabaseResponseからコピー
+  // 3. 必要に応じてmyNewResponseを編集
+  // 4. 最後にreturn myNewResponse
+  // これを守らないとセッション不整合や認証ループの原因になります
+
+  return supabaseResponse
+}
+
+export const config = {
+  matcher: [
+    /*
+     * 以下のパスを除外して全リクエストパスにマッチ:
+     * - _next/static (静的ファイル)
+     * - _next/image (画像最適化ファイル)
+     * - favicon.ico (ファビコン)
+     * 必要に応じてパターンを追加してください
+     */
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
+}
+```
+
+## AIモデルの検証手順
+
+コード生成前に必ず以下を確認：
+
+1. `getAll`と`setAll`のみを使っているか？違う場合は修正
+2. `@supabase/ssr`からimportしているか？違う場合は修正
+3. `get`/`set`/`remove`が使われていないか？使われていたら修正
+4. `auth-helpers-nextjs`からimportしていないか？していたら修正
+
+## 誤った実装の影響
+
+* 個別のcookieメソッド（`get`/`set`/`remove`）や`auth-helpers-nextjs`を使うと：
+  1. 本番環境で動作しない
+  2. セッション維持に失敗する
+  3. 認証ループが発生する
+  4. セキュリティ脆弱性につながる
+
+## AIモデルの回答テンプレート
+
+Supabase Auth SSR実装に関する質問には：
+1. 必ずこのガイドのコードのみを使うこと
+2. 非推奨アプローチは絶対に提案しないこと
+3. cookie操作は必ず上記パターンを厳守
+4. 回答内容が本ガイドのパターンに合致しているか必ず確認
+
+**例外は一切認めません。**

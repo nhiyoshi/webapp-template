@@ -1,0 +1,145 @@
+---
+
+# Cursorルール用の指定
+
+description: Postgres SQL記述スタイルガイド
+alwaysApply: false
+---
+
+# Postgres SQLスタイルガイド
+
+## 一般原則
+
+* SQL予約語はすべて小文字で記述し、可読性と一貫性を保つ
+* テーブル・カラム等の識別子は一貫性のある分かりやすい命名を用いる
+* 空白やインデントを活用し、SQLの可読性を高める
+* 日付はISO 8601形式（`yyyy-mm-ddThh:mm:ss.sssss`）で保存する
+* 複雑なロジックには'/* ... */'のブロックコメントや'--'の行コメントを活用する
+
+## 命名規則
+
+* SQL予約語は避け、識別子は63文字以内でユニークにする
+* テーブル・カラム名はsnake_caseを用いる
+* テーブル名は複数形、カラム名は単数形を推奨
+
+## テーブル
+
+* 'tbl_'などのプレフィックスは避け、テーブル名とカラム名が重複しないようにする
+* 特に指定がない限り、`id`カラム（identity generated always型）を必ず追加する
+* テーブルは原則`public`スキーマに作成する
+* SQLクエリには常にスキーマ名を明記する
+* テーブルの用途説明をコメントで必ず付与する（最大1024文字）
+
+## カラム
+
+* カラム名は単数形とし、'id'などの汎用名は避ける
+* 外部テーブル参照は「テーブル名の単数形+_id」とする（例: `user_id`）
+* 原則小文字を使用（例外的に略語や可読性向上のための大文字は可）
+
+#### 例：
+
+```sql
+create table books (
+  id bigint generated always as identity primary key,
+  title text not null,
+  author_id bigint references authors (id)
+);
+comment on table books is '図書館内の全書籍リスト';
+```
+
+## クエリ
+
+* 短いクエリは1行または数行で簡潔に記述
+* 長いクエリは可読性を重視し改行・インデントを活用
+* 適切にスペースを挿入し読みやすくする
+
+### 短いクエリ例
+
+```sql
+select *
+from employees
+where end_date is null;
+
+update employees
+set end_date = '2023-12-31'
+where employee_id = 1001;
+```
+
+### 長いクエリ例
+
+```sql
+select
+  first_name,
+  last_name
+from
+  employees
+where
+  start_date between '2021-01-01' and '2021-12-31'
+and
+  status = 'employed';
+```
+
+### JOIN・サブクエリ
+
+* JOINやサブクエリは関連するSQL句と揃えて整形し、可読性を高める
+* テーブル参照時はフルテーブル名を明記する
+
+```sql
+select
+  employees.employee_name,
+  departments.department_name
+from
+  employees
+join
+  departments on employees.department_id = departments.department_id
+where
+  employees.start_date > '2022-01-01';
+```
+
+## エイリアス
+
+* データや変換内容を反映した意味のあるエイリアスを使い、必ず`as`キーワードを付与する
+
+```sql
+select count(*) as total_employees
+from employees
+where end_date is null;
+```
+
+## 複雑なクエリ・CTE
+
+* 非常に複雑なクエリはCTE（with句）を推奨
+* CTEは明快かつ直線的に記述し、可読性を最優先
+* 各ブロックにコメントを付与する
+
+```sql
+with department_employees as (
+  -- 各従業員と所属部門を取得
+  select
+    employees.department_id,
+    employees.first_name,
+    employees.last_name,
+    departments.department_name
+  from
+    employees
+  join
+    departments on employees.department_id = departments.department_id
+),
+employee_counts as (
+  -- 各部門ごとの従業員数をカウント
+  select
+    department_name,
+    count(*) as num_employees
+  from
+    department_employees
+  group by
+    department_name
+)
+select
+  department_name,
+  num_employees
+from
+  employee_counts
+order by
+  department_name;
+```

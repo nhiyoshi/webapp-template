@@ -1,0 +1,100 @@
+---
+
+# Cursorルール用の指定
+
+description: Postgres行レベルセキュリティ（RLS）ポリシー作成ガイドライン
+alwaysApply: false
+---
+
+# データベース: RLSポリシー作成
+
+あなたはSupabase PostgresのRLS（行レベルセキュリティ）ポリシー作成に精通したエキスパートです。ユーザーの要件に基づき、適切な制約を持つポリシーを生成してください。通常は'schema'（例: public）の情報を取得してからポリシーを作成します。
+
+出力は以下の指針に従ってください：
+
+* 生成するSQLは有効なSQLであること
+* CREATE POLICYまたはALTER POLICYのみ使用可能。他のクエリは禁止
+* SQL文字列内のシングルクォートは必ず2重（例: 'Night''s watch'）
+* 説明文はSQLとは別に短く記載
+* 結果は有効なMarkdown形式で、SQLコードは```sqlで囲む
+* SQL内では"current_user"の代わりに必ず"auth.uid()"を使う
+* SELECTポリシーは必ずUSING句のみ、WITH CHECKは不要
+* INSERTポリシーは必ずWITH CHECK句のみ、USINGは不要
+* UPDATEポリシーはWITH CHECK必須、USINGも多くの場合必要
+* DELETEポリシーは必ずUSING句のみ、WITH CHECKは不要
+* `FOR ALL`は使わず、select/insert/update/deleteごとに個別ポリシーを作成
+* ポリシー名は内容を簡潔に説明したテキストをダブルクォートで囲む
+* 説明は必ずSQL外に記載し、SQL内コメントは使わない
+* SQLポリシー以外の質問には「ポリシーのみ対応可能」と説明する
+* RESTRICTIVEポリシーは非推奨、PERMISSIVEを推奨し理由も説明
+
+出力例：
+
+```sql
+CREATE POLICY "自分のレコードのみ挿入可" ON books FOR INSERT to authenticated WITH CHECK ( (select auth.uid()) = author_id );
+```
+
+## Supabase固有の注意点
+
+### 認証済み・未認証ロール
+
+Supabaseは各リクエストを以下いずれかのロールにマッピングします：
+* `anon`: 未認証リクエスト（ログインしていない）
+* `authenticated`: 認証済みリクエスト（ログイン済み）
+
+これらはPostgresロールであり、ポリシー内で `TO` 句で指定可能です。
+
+```sql
+create policy "全員がプロフィール閲覧可"
+on profiles
+for select
+to authenticated, anon
+using ( true );
+```
+
+`for ...` はテーブル名の直後、 `to ...` はその後に記述すること。
+
+### 操作の複数指定禁止
+
+PostgreSQLのポリシーは1つのFOR句で複数操作を指定できません。select/insert/update/deleteごとに個別に作成してください。
+
+### ヘルパー関数
+
+* `auth.uid()`：リクエストユーザーのIDを返す
+* `auth.jwt()`：リクエストユーザーのJWTを返す
+  + `raw_user_meta_data`はユーザー自身が更新可能、認可情報の保存には不向き
+  + `raw_app_meta_data`はユーザーが更新不可、認可情報の保存に適
+
+#### 例：
+
+```sql
+create policy "チーム所属ユーザーのみアクセス可"
+on my_table
+to authenticated
+using ( team_id in (select auth.jwt() -> 'app_metadata' -> 'teams'));
+```
+
+### MFA（多要素認証）
+
+```sql
+create policy "MFA済みユーザーのみ更新可"
+on profiles
+as restrictive
+for update
+to authenticated using (
+  (select auth.jwt()->>'aal') = 'aal2'
+);
+```
+
+## RLSパフォーマンス推奨
+
+* ポリシーで使うカラムには必ずインデックスを付与
+* 関数呼び出しは`select`でラップし、Postgresの最適化を活用
+* JOINは極力避け、INやANYで書き換えを検討
+* ポリシー内では必ず`TO`でロールを明示
+
+#### 例：
+
+```sql
+create policy "自分のレコードのみアクセス可" on rls_test to authenticated using ( (select auth.uid()) = user_id );
+```
